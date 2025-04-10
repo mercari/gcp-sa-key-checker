@@ -26,7 +26,7 @@ func NewKeyCollection(serviceAccountIDs []string) *KeyCollection {
 	}
 }
 
-func (k *KeyCollection) FetchKeys(groundTruth bool) error {
+func (k *KeyCollection) FetchKeys(groundTruth bool, quotaProject string) error {
 	err := k.FetchObservedKeys()
 	if err != nil {
 		return err
@@ -45,6 +45,8 @@ func (k *KeyCollection) FetchGroundTruthKeys() error {
 
 	k.groundTruthKeys = make([]ServiceAccountKeys, len(k.serviceAccountIDs))
 
+	iam := iamService()
+
 	res, err := parllelMap(k.serviceAccountIDs, func(sa string) (ServiceAccountKeys, error) {
 		if k.isBadSA(sa) {
 			return nil, nil
@@ -52,7 +54,7 @@ func (k *KeyCollection) FetchGroundTruthKeys() error {
 		if err := limiter.Wait(context.Background()); err != nil {
 			return nil, err
 		}
-		return getServiceAccountKeys(context.Background(), iamService(), sa)
+		return getServiceAccountKeys(context.Background(), iam, sa)
 	})
 	if err != nil {
 		return fmt.Errorf("error getting keys from GCP API: %v", err)

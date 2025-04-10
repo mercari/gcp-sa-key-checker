@@ -10,6 +10,7 @@ import (
 
 	asset "cloud.google.com/go/asset/apiv1"
 	"google.golang.org/api/iam/v1"
+	"google.golang.org/api/option"
 )
 
 var groundTruth = flag.Bool("ground-truth", false, "If specified, will check against the GCP API for the ground truth")
@@ -20,6 +21,7 @@ var scope = flag.String("scope", "", "Use the cloud asset API to get SAs. Can be
 var inFile = flag.String("in", "", "Input file to read service accounts from, one per line")
 
 var outDir = flag.String("out-dir", "", "Output directory to write PEM x509 certificates to")
+var quotaProject = flag.String("quota-project", "", "Quota project to use for the GCP API. This is required if you are using a service account that is not in the same project as the service account you are trying to list keys for. This is also required if you are using the cloud asset API with --scope.")
 
 // output modes
 const (
@@ -52,8 +54,16 @@ func decideOutputMode() (string, error) {
 	return OUTPUT_NORMAL, nil
 }
 
+func gcpClientOptions() []option.ClientOption {
+	var options []option.ClientOption
+	if *quotaProject != "" {
+		options = append(options, option.WithQuotaProject(*quotaProject))
+	}
+	return options
+}
+
 var iamService = sync.OnceValue(func() *iam.Service {
-	iamService, err := iam.NewService(context.Background())
+	iamService, err := iam.NewService(context.Background(), gcpClientOptions()...)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -67,7 +77,7 @@ func getTargetServiceAccounts() ([]string, error) {
 	}
 
 	if *scope != "" {
-		c, err := asset.NewClient(context.Background())
+		c, err := asset.NewClient(context.Background(), gcpClientOptions()...)
 		if err != nil {
 			return nil, err
 		}
@@ -123,7 +133,7 @@ func main() {
 	fmt.Printf("Analyzing %d service accounts\n", len(serviceAccountIDs))
 
 	keyCollection := NewKeyCollection(serviceAccountIDs)
-	err = keyCollection.FetchKeys(*groundTruth)
+	err = keyCollection.FetchKeys(*groundTruth, *quotaProject)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)

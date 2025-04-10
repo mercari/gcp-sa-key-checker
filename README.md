@@ -1,4 +1,4 @@
-# Unprivileged GCP Service Account Key Checker
+# Third Party GCP Service Account Key Checker
 
 This program implements a simple security checker for GCP Service Account Keys for any GCP Service Account using the [public x509 certificate endpoint](https://cloud.google.com/iam/docs/best-practices-for-managing-service-account-keys#confidential-information).
 
@@ -6,7 +6,7 @@ It is useful for auditing if GCP Service Accounts used by third party SaaS servi
 
 ## Background
 
-All Google Cloud Service Accounts have service account keys associated with them which they use for signing JWTs which can be used as idtokens or [exchanged for access tokens](https://developers.google.com/identity/protocols/oauth2/service-account#httprest). These are almost always 2048-bit RSA keys and are the foundation of the GCP security model.
+All Google Cloud Service Accounts have service account keys associated with them which they use for signing JWTs which can be used as idtokens or [exchanged for access tokens](https://developers.google.com/identity/protocols/oauth2/service-account#httprest). These are almost always 2048-bit RSA keys and are a foundational component of the GCP security model.
 
 These keys have attributes `keyOrigin` and `keyType`, which can be:
 
@@ -19,9 +19,9 @@ These keys have attributes `keyOrigin` and `keyType`, which can be:
 
 These can be in the following combinations:
 
-1. `GOOGLE_PROVIDED`/`SYSTEM_MANAGED` these are the cloud platform internal SAs that are attached to every Service Account. These keys are used by the methods in the [Service Account Credentials REST API](https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts) like [`SignJWT`](https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/signJwt).
-2. `GOOGLE_PROVIDED`/`SYSTEM_MANAGED` these are created by the [`projects.serviceAccounts.keys.create` API](https://cloud.google.com/iam/docs/reference/rest/v1/projects.serviceAccounts.keys/create) and then downloaded to get a "Service Account Key JSON".
-3. `USER_PROVIDED`/`USER_MANAGED` these are created by the user and the certificate portion is uploaded using [`projects.serviceAccounts.keys.upload` API](https://cloud.google.com/iam/docs/reference/rest/v1/projects.serviceAccounts.keys/upload). Google Cloud never has access to these private keys.
+- `GOOGLE_PROVIDED`/`SYSTEM_MANAGED` these are the cloud platform internal SAs that are attached to every Service Account. These keys are used by the methods in the [Service Account Credentials REST API](https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts) like [`SignJWT`](https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/signJwt).
+- `GOOGLE_PROVIDED`/`SYSTEM_MANAGED` these are created by the [`projects.serviceAccounts.keys.create` API](https://cloud.google.com/iam/docs/reference/rest/v1/projects.serviceAccounts.keys/create) and then downloaded to get a "Service Account Key JSON".
+- `USER_PROVIDED`/`USER_MANAGED` these are created by the user and the certificate portion is uploaded using [`projects.serviceAccounts.keys.upload` API](https://cloud.google.com/iam/docs/reference/rest/v1/projects.serviceAccounts.keys/upload). Google Cloud never has access to these private keys.
 
 Note that `USER_PROVIDED`/`SYSTEM_MANAGED` doesn't exist because there's no way to import private key material into the cloud.
 
@@ -37,11 +37,11 @@ Clone this repository and ensure you have golang installed.
 
 If you plan to use features requiring GCP authentication, ensure you run `gcloud auth login --update-adc`.
 
-You can run the tool with `go run ./... [args]`.
+You can run the tool with `go run ./... [args]` (or `go build` and then `./gcp-sa-key-checker [args]`).
 
 The list of Service Account emails to process can be provided in four different ways:
 
-- On the command line as individual arguments
+- On the command line as individual positional arguments
 - with the `--in FILE` flag, pointing to a text file with one service account email on each line
 - with the `--project PROJECTID` flag, which will list all Service Accounts in the project using the [`projects.serviceAccounts.list` API](https://cloud.google.com/iam/docs/reference/rest/v1/projects.serviceAccounts/list)
 - with the `--scope SCOPE` flag, which will list all active service accounts using the [`searchAllResources` API](https://cloud.google.com/asset-inventory/docs/reference/rest/v1/TopLevel/searchAllResources). Supported scopes are:
@@ -58,6 +58,7 @@ The tool can be run in two different modes:
 Additional flags:
 
 - `--out-dir DIR` - will write the PEM encoded x509 certificates for all scanned SAs to the output directory
+- `--quota-project PROJECT_ID` - will use the specified project for quota/billing purposes. Only really relevant for the `--ground-truth` which issues many IAM read calls.
 
 ## How it Works
 
@@ -69,7 +70,7 @@ The certificate for each SA key is downloaded using the `https://www.googleapis.
   - `3650d` (~10 years) -> `GOOGLE_PROVIDED`/`USER_MANAGED`
     - legacy user-created SA keys [had a 10 year validity](https://cloud.google.com/blog/products/containers-kubernetes/introducing-workload-identity-better-authentication-for-your-gke-applications#:~:text=but%20service%20account%20keys%20only%20expire%20every%2010%20years)
   - Valid between `730d` (~2 years) and `761d` (~2 years + 1 month) -> `GOOGLE_PROVIDED`/`SYSTEM_MANAGED`
-    - This seems to be undocumented but was confirmed experimentally. Seems to have started rollout around February 2025
+    - This does not seem to be documented but was confirmed experimentally. Seems to have started rollout around February 2025
   - `NotAfter` date of `9999-12-31 23:59:59 +0000 UTC` -> `GOOGLE_PROVIDED`/`SYSTEM_MANAGED`
     - SA keys generated after around May 2021 seem to not expire at all
   - Any period in the [`iam.serviceAccountKeyExpiryHours` org constraint](https://cloud.google.com/resource-manager/docs/organization-policy/restricting-service-accounts#limit_key_expiry) -> `GOOGLE_PROVIDED`/`USER_MANAGED`
@@ -77,7 +78,7 @@ The certificate for each SA key is downloaded using the `https://www.googleapis.
 - Names (`Subject` and `Issuer`)
   - GAIA IDs -> `GOOGLE_PROVIDED`/`USER_MANAGED`
     - Experimentally determined user-generated keys always have GAIA IDs in these fields.
-  - email or email truncated to 64 bytes -> `GOOGLE_PROVIDED`/`GOOGLE_MANAGED`
+  - service account email or email truncated to 64 bytes -> `GOOGLE_PROVIDED`/`GOOGLE_MANAGED`
     - It is unclear when this truncation occurs, and seems to not be documented.
   - Anything else cannot be generated by GCP -> `USER_PROVIDED`/`USER_MANAGED`
 - Crypto settings:
@@ -113,7 +114,7 @@ Additionally, we pulled data from [Wiz](https://app.wiz.io/) for external servic
 }
 ```
 
-This discovered that several of our SaaS services are not following GCP [best practices for managing service account keys](https://cloud.google.com/iam/docs/best-practices-for-managing-service-account-keys) and which we plan to privately follow up on.
+This discovered that several of our SaaS services are potentially not following GCP [best practices for managing service account keys](https://cloud.google.com/iam/docs/best-practices-for-managing-service-account-keys) and we plan to privately follow up with them.
 
 The `--out-dir` parameter is useful for running keys through [badkeys](https://github.com/badkeys/badkeys), however we found no examples of such keys in practice. A survey of SA keys looking for issues like duplicate moduli, [shared primes](https://factorable.net/resources.html) or other oddities could be interesting future work, particularly if combined with recon to gather a [large number of](https://sourcegraph.com/search) [SAs to scan](https://cloud.google.com/iam/docs/service-agents).
 
